@@ -34,7 +34,7 @@ steps:
       target: 
         from_secret: deploy_home
       source:
-        - build/
+        - bin/
     when:
       branch: devnet
   - name: slack
