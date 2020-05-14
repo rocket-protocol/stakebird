@@ -37,7 +37,7 @@ steps:
         - bin/
     when:
       branch: devnet
-  - name: deploy-devnet
+  - name: deploy-devnet-srv
     image: appleboy/drone-ssh
     settings:
       username: ubuntu
@@ -60,6 +60,6 @@ steps:
       status: [success, failure]
 ---
 kind: signature
-hmac: 82c7c10e57350a2c2102c2c3d290141cc6b2ec9702f940457d4757da2dc6a048
+hmac: 9de5e36a5efb029463f5132a6061be5feea3c88f672becc9d76a52454c840d3c
 
 ...
