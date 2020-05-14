@@ -37,6 +37,20 @@ steps:
         - bin/
     when:
       branch: devnet
+  - name: deploy-devnet
+    image: appleboy/drone-ssh
+    settings:
+      username: ubuntu
+      host: 
+        from_secret: devnet_host
+      key:
+        from_secret: deploy_key
+      target: 
+        from_secret: deploy_home
+      script:
+        - sh ~/deploy-devnet.sh
+    when:
+      branch: devnet
   - name: slack
     image: plugins/slack
     settings:
