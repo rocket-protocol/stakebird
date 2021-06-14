@@ -89,10 +89,16 @@ type NodeStatus = {
   validator_info: JSON,
 };
 
+// sets the gas price for all contract deployments
+const overrides = {
+  gasPrice: 100000000000
+}
+
 async function deploy() {
   var startTime = new Date();
   const provider = await new ethers.providers.JsonRpcProvider(args["eth-node"]);
   let wallet = new ethers.Wallet(args["eth-privkey"], provider);
+
 
   if (args["test-mode"] == "True" || args["test-mode"] == "true") {
     var success = false;
@@ -126,12 +132,6 @@ async function deploy() {
     const alt_location_2_a = "TestERC20A.json"
     const alt_location_2_b = "TestERC20B.json"
     const alt_location_2_c = "TestERC20C.json"
-    const solidity_dir_a = "artifacts/contracts/TestERC20A.sol/TestERC20A.json"
-    const solidity_dir_b = "artifacts/contracts/TestERC20B.sol/TestERC20B.json"
-    const solidity_dir_c = "artifacts/contracts/TestERC20C.sol/TestERC20C.json"
-    const docker_location_a = "/artifacts/contracts/TestERC20A.sol/TestERC20A.json"
-    const docker_location_b = "/artifacts/contracts/TestERC20B.sol/TestERC20B.json"
-    const docker_location_c = "/artifacts/contracts/TestERC20C.sol/TestERC20C.json"
     if (fs.existsSync(main_location_a)) {
       erc20_a_path = main_location_a
       erc20_b_path = main_location_b
@@ -144,42 +144,34 @@ async function deploy() {
       erc20_a_path = alt_location_2_a
       erc20_b_path = alt_location_2_b
       erc20_c_path = alt_location_2_c
-    } else if (fs.existsSync(solidity_dir_a)) {
-      erc20_a_path = solidity_dir_a
-      erc20_b_path = solidity_dir_b
-      erc20_c_path = solidity_dir_c
-    } else if (fs.existsSync(docker_location_a)) {
-      erc20_a_path = docker_location_a
-      erc20_b_path = docker_location_b
-      erc20_c_path = docker_location_c
     } else {
       console.log("Test mode was enabled but the ERC20 contracts can't be found!")
       exit(1)
     }
 
+
     const { abi, bytecode } = getContractArtifacts(erc20_a_path);
     const erc20Factory = new ethers.ContractFactory(abi, bytecode, wallet);
-    const testERC20 = (await erc20Factory.deploy()) as TestERC20A;
+    const testERC20 = (await erc20Factory.deploy(overrides)) as TestERC20A;
     await testERC20.deployed();
     const erc20TestAddress = testERC20.address;
     console.log("ERC20 deployed at Address - ", erc20TestAddress);
     const { abi: abi1, bytecode: bytecode1 } = getContractArtifacts(erc20_b_path);
     const erc20Factory1 = new ethers.ContractFactory(abi1, bytecode1, wallet);
-    const testERC201 = (await erc20Factory1.deploy()) as TestERC20B;
+    const testERC201 = (await erc20Factory1.deploy(overrides)) as TestERC20B;
     await testERC201.deployed();
     const erc20TestAddress1 = testERC201.address;
     console.log("ERC20 deployed at Address - ", erc20TestAddress1);
     const { abi: abi2, bytecode: bytecode2 } = getContractArtifacts(erc20_c_path);
     const erc20Factory2 = new ethers.ContractFactory(abi2, bytecode2, wallet);
-    const testERC202 = (await erc20Factory2.deploy()) as TestERC20C;
+    const testERC202 = (await erc20Factory2.deploy(overrides)) as TestERC20C;
     await testERC202.deployed();
     const erc20TestAddress2 = testERC202.address;
     console.log("ERC20 deployed at Address - ", erc20TestAddress2);
 
 
     const arbitrary_logic_path = "/gravity/solidity/artifacts/contracts/TestUniswapLiquidity.sol/TestUniswapLiquidity.json"
-    if (fs.existsSync(arbitrary_logic_path)) {
-      console.log("Starting arbitrary logic test")
+    if (fs.existsSync(arbitrary_logic_path)) { 
       const { abi, bytecode } = getContractArtifacts(arbitrary_logic_path);
       const liquidityFactory = new ethers.ContractFactory(abi, bytecode, wallet);
       const testUniswapLiquidity = (await liquidityFactory.deploy(erc20TestAddress)) as TestUniswapLiquidity;
@@ -230,7 +222,8 @@ async function deploy() {
     gravityId,
     vote_power,
     eth_addresses,
-    powers
+    powers,
+    overrides
   )) as Gravity;
 
   await gravity.deployed();
