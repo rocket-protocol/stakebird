@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/cosmos/cosmos-sdk/client"
@@ -53,18 +52,12 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/evidence"
 	evidencekeeper "github.com/cosmos/cosmos-sdk/x/evidence/keeper"
 	evidencetypes "github.com/cosmos/cosmos-sdk/x/evidence/types"
+
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	transfer "github.com/cosmos/cosmos-sdk/x/ibc/applications/transfer"
-	ibctransferkeeper "github.com/cosmos/cosmos-sdk/x/ibc/applications/transfer/keeper"
-	ibctransfertypes "github.com/cosmos/cosmos-sdk/x/ibc/applications/transfer/types"
-	ibc "github.com/cosmos/cosmos-sdk/x/ibc/core"
-	porttypes "github.com/cosmos/cosmos-sdk/x/ibc/core/05-port/types"
-	ibchost "github.com/cosmos/cosmos-sdk/x/ibc/core/24-host"
-	ibckeeper "github.com/cosmos/cosmos-sdk/x/ibc/core/keeper"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	mintkeeper "github.com/cosmos/cosmos-sdk/x/mint/keeper"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
@@ -83,6 +76,13 @@ import (
 	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
 	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
 	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	transfer "github.com/cosmos/ibc-go/modules/apps/transfer"
+	ibctransferkeeper "github.com/cosmos/ibc-go/modules/apps/transfer/keeper"
+	ibctransfertypes "github.com/cosmos/ibc-go/modules/apps/transfer/types"
+	ibc "github.com/cosmos/ibc-go/modules/core"
+	porttypes "github.com/cosmos/ibc-go/modules/core/05-port/types"
+	ibchost "github.com/cosmos/ibc-go/modules/core/24-host"
+	ibckeeper "github.com/cosmos/ibc-go/modules/core/keeper"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
@@ -101,11 +101,11 @@ import (
 	stakekeeper "github.com/public-awesome/stargaze/x/stake/keeper"
 	staketypes "github.com/public-awesome/stargaze/x/stake/types"
 
-	"github.com/tendermint/liquidity/x/liquidity"
-	liquiditykeeper "github.com/tendermint/liquidity/x/liquidity/keeper"
-	liquiditytypes "github.com/tendermint/liquidity/x/liquidity/types"
-
-	"github.com/CosmWasm/wasmd/x/wasm"
+	"github.com/cosmos/cosmos-sdk/x/authz"
+	authzkeeper "github.com/cosmos/cosmos-sdk/x/authz/keeper"
+	authzmodule "github.com/cosmos/cosmos-sdk/x/authz/module"
+	feegranttypes "github.com/cosmos/cosmos-sdk/x/feegrant"
+	feegrantkeeper "github.com/cosmos/cosmos-sdk/x/feegrant/keeper"
 	daokeeper "github.com/public-awesome/stargaze/x/dao/keeper"
 	daotypes "github.com/public-awesome/stargaze/x/dao/types"
 )
@@ -124,20 +124,20 @@ var (
 
 // GetEnabledProposals parses the ProposalsEnabled / EnableSpecificProposals values to
 // produce a list of enabled proposals to pass into wasmd app.
-func GetEnabledProposals() []wasm.ProposalType {
-	if EnableSpecificProposals == "" {
-		if ProposalsEnabled == "true" {
-			return wasm.EnableAllProposals
-		}
-		return wasm.DisableAllProposals
-	}
-	chunks := strings.Split(EnableSpecificProposals, ",")
-	proposals, err := wasm.ConvertToProposals(chunks)
-	if err != nil {
-		panic(err)
-	}
-	return proposals
-}
+// func GetEnabledProposals() []wasm.ProposalType {
+// 	if EnableSpecificProposals == "" {
+// 		if ProposalsEnabled == "true" {
+// 			return wasm.EnableAllProposals
+// 		}
+// 		return wasm.DisableAllProposals
+// 	}
+// 	chunks := strings.Split(EnableSpecificProposals, ",")
+// 	proposals, err := wasm.ConvertToProposals(chunks)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	return proposals
+// }
 
 var (
 	// DefaultNodeHome default home directories for the application daemon
@@ -166,6 +166,7 @@ var (
 		ibc.AppModuleBasic{},
 		upgrade.AppModuleBasic{},
 		evidence.AppModuleBasic{},
+		authzmodule.AppModuleBasic{},
 		transfer.AppModuleBasic{},
 		vesting.AppModuleBasic{},
 
@@ -174,8 +175,6 @@ var (
 		user.AppModuleBasic{},
 		faucet.AppModuleBasic{},
 		stake.AppModuleBasic{},
-		liquidity.AppModuleBasic{},
-		wasm.AppModuleBasic{},
 		dao.AppModuleBasic{},
 	)
 
@@ -193,7 +192,6 @@ var (
 		curatingtypes.RewardPoolName: {authtypes.Minter, authtypes.Burner},
 		curatingtypes.VotingPoolName: {authtypes.Minter, authtypes.Burner},
 		faucet.ModuleName:            {authtypes.Minter, authtypes.Burner},
-		liquiditytypes.ModuleName:    {authtypes.Minter, authtypes.Burner},
 		staketypes.ModuleName:        {authtypes.Minter, authtypes.Burner},
 	}
 )
@@ -209,7 +207,7 @@ var (
 type StargazeApp struct {
 	*baseapp.BaseApp
 	legacyAmino       *codec.LegacyAmino
-	appCodec          codec.Marshaler
+	appCodec          codec.Codec
 	interfaceRegistry types.InterfaceRegistry
 
 	invCheckPeriod uint
@@ -234,6 +232,8 @@ type StargazeApp struct {
 	IBCKeeper        *ibckeeper.Keeper // IBC Keeper must be a pointer in the app, so we can SetRouter on it correctly
 	EvidenceKeeper   evidencekeeper.Keeper
 	TransferKeeper   ibctransferkeeper.Keeper
+	FeeGrantKeeper   feegrantkeeper.Keeper
+	AuthzKeeper      authzkeeper.Keeper
 
 	// Stargaze Keepers
 	CuratingKeeper curatingkeeper.Keeper
@@ -245,17 +245,20 @@ type StargazeApp struct {
 	// make scoped keepers public for test purposes
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
-	scopedWasmKeeper     capabilitykeeper.ScopedKeeper
+	// scopedWasmKeeper     capabilitykeeper.ScopedKeeper
 
 	// third party keepers
-	LiquidityKeeper liquiditykeeper.Keeper
-	wasmKeeper      wasm.Keeper
+	//	LiquidityKeeper liquiditykeeper.Keeper
+	//	wasmKeeper      wasm.Keeper
 
 	// the module manager
 	mm *module.Manager
 
 	// simulation manager
 	sm *module.SimulationManager
+
+	// the configurator
+	configurator module.Configurator
 }
 
 func init() {
@@ -271,7 +274,7 @@ func init() {
 func NewStargazeApp(
 	logger log.Logger, db dbm.DB, traceStore io.Writer,
 	loadLatest bool, skipUpgradeHeights map[int64]bool,
-	homePath string, invCheckPeriod uint, enabledProposals []wasm.ProposalType,
+	homePath string, invCheckPeriod uint,
 	encodingConfig stargazeappparams.EncodingConfig,
 	appOpts servertypes.AppOptions,
 	baseAppOptions ...func(*baseapp.BaseApp),
@@ -283,21 +286,20 @@ func NewStargazeApp(
 
 	bApp := baseapp.NewBaseApp(appName, logger, db, encodingConfig.TxConfig.TxDecoder(), baseAppOptions...)
 	bApp.SetCommitMultiStoreTracer(traceStore)
-	bApp.SetAppVersion(version.Version)
+	bApp.SetVersion(version.Version)
 	bApp.SetInterfaceRegistry(interfaceRegistry)
 
 	keys := sdk.NewKVStoreKeys(
 		authtypes.StoreKey, banktypes.StoreKey, stakingtypes.StoreKey,
 		minttypes.StoreKey, distrtypes.StoreKey, slashingtypes.StoreKey,
-		govtypes.StoreKey, paramstypes.StoreKey, ibchost.StoreKey, upgradetypes.StoreKey,
+		govtypes.StoreKey, paramstypes.StoreKey, ibchost.StoreKey, upgradetypes.StoreKey, feegranttypes.StoreKey,
 		evidencetypes.StoreKey, ibctransfertypes.StoreKey, capabilitytypes.StoreKey,
+		authzkeeper.StoreKey,
 		// Stargaze Stores
 		curatingtypes.StoreKey,
 		usertypes.StoreKey,
 		faucet.StoreKey,
 		staketypes.StoreKey,
-		liquiditytypes.StoreKey,
-		wasm.StoreKey,
 		daotypes.StoreKey,
 	)
 	tkeys := sdk.NewTransientStoreKeys(paramstypes.TStoreKey)
@@ -327,7 +329,7 @@ func NewStargazeApp(
 	)
 	scopedIBCKeeper := app.CapabilityKeeper.ScopeToModule(ibchost.ModuleName)
 	scopedTransferKeeper := app.CapabilityKeeper.ScopeToModule(ibctransfertypes.ModuleName)
-	scopedWasmKeeper := app.CapabilityKeeper.ScopeToModule(wasm.ModuleName)
+	// scopedWasmKeeper := app.CapabilityKeeper.ScopeToModule(wasm.ModuleName)
 
 	// add keepers
 	app.AccountKeeper = authkeeper.NewAccountKeeper(
@@ -354,7 +356,9 @@ func NewStargazeApp(
 	app.CrisisKeeper = crisiskeeper.NewKeeper(
 		app.GetSubspace(crisistypes.ModuleName), invCheckPeriod, app.BankKeeper, authtypes.FeeCollectorName,
 	)
-	app.UpgradeKeeper = upgradekeeper.NewKeeper(skipUpgradeHeights, keys[upgradetypes.StoreKey], appCodec, homePath)
+	app.FeeGrantKeeper = feegrantkeeper.NewKeeper(appCodec, keys[feegranttypes.StoreKey], app.AccountKeeper)
+	app.UpgradeKeeper = upgradekeeper.NewKeeper(skipUpgradeHeights, keys[upgradetypes.StoreKey],
+		appCodec, homePath, app.BaseApp)
 
 	// register the proposal types
 	govRouter := govtypes.NewRouter()
@@ -373,9 +377,11 @@ func NewStargazeApp(
 		stakingtypes.NewMultiStakingHooks(app.DistrKeeper.Hooks(), app.SlashingKeeper.Hooks()),
 	)
 
+	app.AuthzKeeper = authzkeeper.NewKeeper(keys[authzkeeper.StoreKey], appCodec, app.BaseApp.MsgServiceRouter())
 	// Create IBC Keeper
 	app.IBCKeeper = ibckeeper.NewKeeper(
-		appCodec, keys[ibchost.StoreKey], app.GetSubspace(ibchost.ModuleName), app.StakingKeeper, scopedIBCKeeper,
+		appCodec, keys[ibchost.StoreKey], app.GetSubspace(ibchost.ModuleName),
+		app.StakingKeeper, app.UpgradeKeeper, scopedIBCKeeper,
 	)
 
 	// Create Transfer Keepers
@@ -426,49 +432,50 @@ func NewStargazeApp(
 		app.GetSubspace(staketypes.ModuleName),
 	)
 
-	app.LiquidityKeeper = liquiditykeeper.NewKeeper(
-		appCodec, keys[liquiditytypes.StoreKey], app.GetSubspace(liquiditytypes.ModuleName),
-		app.BankKeeper, app.AccountKeeper,
-	)
-
+	// app.LiquidityKeeper = liquiditykeeper.NewKeeper(
+	// 	appCodec, keys[liquiditytypes.StoreKey], app.GetSubspace(liquiditytypes.ModuleName),
+	// 	app.BankKeeper, app.AccountKeeper,
+	// )
 	app.daoKeeper = daokeeper.NewKeeper(
 		appCodec,
 		keys[daotypes.StoreKey],
 		memKeys[daotypes.StoreKey],
 	)
 
-	// just re-use the full router - do we want to limit this more?
-	var wasmRouter = bApp.Router()
-	wasmDir := filepath.Join(homePath, "wasm")
-
-	wasmConfig, err := wasm.ReadWasmConfig(appOpts)
-	if err != nil {
-		panic("error while reading wasm config: " + err.Error())
-	}
-	// The last arguments can contain custom message handlers, and custom query handlers,
-	// if we want to allow any custom callbacks
-	supportedFeatures := "staking"
-	app.wasmKeeper = wasm.NewKeeper(
-		appCodec,
-		keys[wasm.StoreKey],
-		app.GetSubspace(wasm.ModuleName),
-		app.AccountKeeper,
-		app.BankKeeper,
-		app.StakingKeeper,
-		app.DistrKeeper,
-		wasmRouter,
-		wasmDir,
-		wasmConfig,
-		supportedFeatures,
-		nil,
-		nil,
-	)
-
-	// The gov proposal types can be individually enabled
-	if len(enabledProposals) != 0 {
-		govRouter.AddRoute(wasm.RouterKey, wasm.NewWasmProposalHandler(app.wasmKeeper, enabledProposals))
-	}
 	app.IBCKeeper.SetRouter(ibcRouter)
+
+	/* Disabling cosmWasm */
+	// // just re-use the full router - do we want to limit this more?
+	// var wasmRouter = bApp.Router()
+	// wasmDir := filepath.Join(homePath, "wasm")
+
+	// wasmConfig, err := wasm.ReadWasmConfig(appOpts)
+	// if err != nil {
+	// 	panic("error while reading wasm config: " + err.Error())
+	// }
+	// // The last arguments can contain custom message handlers, and custom query handlers,
+	// // if we want to allow any custom callbacks
+	// supportedFeatures := "staking"
+	// app.wasmKeeper = wasm.NewKeeper(
+	// 	appCodec,
+	// 	keys[wasm.StoreKey],
+	// 	app.GetSubspace(wasm.ModuleName),
+	// 	app.AccountKeeper,
+	// 	app.BankKeeper,
+	// 	app.StakingKeeper,
+	// 	app.DistrKeeper,
+	// 	wasmRouter,
+	// 	wasmDir,
+	// 	wasmConfig,
+	// 	supportedFeatures,
+	// 	nil,
+	// 	nil,
+	// )
+
+	// // The gov proposal types can be individually enabled
+	// if len(enabledProposals) != 0 {
+	// 	govRouter.AddRoute(wasm.RouterKey, wasm.NewWasmProposalHandler(app.wasmKeeper, enabledProposals))
+	// }
 
 	/****  Module Options ****/
 
@@ -498,14 +505,13 @@ func NewStargazeApp(
 		evidence.NewAppModule(app.EvidenceKeeper),
 		ibc.NewAppModule(app.IBCKeeper),
 		params.NewAppModule(app.ParamsKeeper),
+		authzmodule.NewAppModule(appCodec, app.AuthzKeeper, app.AccountKeeper, app.BankKeeper, app.interfaceRegistry),
 		transferModule,
 		// StargazeModules
 		curating.NewAppModule(appCodec, app.CuratingKeeper, app.AccountKeeper, app.BankKeeper),
 		user.NewAppModule(appCodec, app.UserKeeper),
 		faucet.NewAppModule(app.FaucetKeeper),
 		stake.NewAppModule(appCodec, app.StakeKeeper, app.CuratingKeeper, app.StakingKeeper),
-		liquidity.NewAppModule(appCodec, app.LiquidityKeeper, app.AccountKeeper, app.BankKeeper),
-		wasm.NewAppModule(&app.wasmKeeper, app.StakingKeeper),
 		dao.NewAppModule(appCodec, app.daoKeeper, app.DistrKeeper, app.BankKeeper),
 	)
 
@@ -519,10 +525,11 @@ func NewStargazeApp(
 		curatingtypes.ModuleName,
 		distrtypes.ModuleName, slashingtypes.ModuleName,
 		evidencetypes.ModuleName, stakingtypes.ModuleName, ibchost.ModuleName,
-		liquiditytypes.ModuleName,
+		// liquiditytypes.ModuleName,
 	)
 	app.mm.SetOrderEndBlockers(crisistypes.ModuleName, govtypes.ModuleName,
-		stakingtypes.ModuleName, curatingtypes.ModuleName, liquiditytypes.ModuleName,
+		stakingtypes.ModuleName, curatingtypes.ModuleName,
+		// liquiditytypes.ModuleName,
 	)
 
 	// NOTE: The genutils moodule must occur after staking so that pools are
@@ -537,18 +544,18 @@ func NewStargazeApp(
 		minttypes.ModuleName, crisistypes.ModuleName,
 		ibchost.ModuleName, genutiltypes.ModuleName,
 		evidencetypes.ModuleName, ibctransfertypes.ModuleName,
+		authz.ModuleName, feegranttypes.ModuleName,
 		// stargaze init genesis
 		curatingtypes.ModuleName,
 		usertypes.ModuleName,
 		staketypes.ModuleName,
-		liquiditytypes.ModuleName,
-		wasm.ModuleName,
 		daotypes.ModuleName,
 	)
 
 	app.mm.RegisterInvariants(&app.CrisisKeeper)
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter(), encodingConfig.Amino)
-	app.mm.RegisterServices(module.NewConfigurator(app.MsgServiceRouter(), app.GRPCQueryRouter()))
+	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
+	app.mm.RegisterServices(app.configurator)
 
 	// add test gRPC service for testing gRPC queries in isolation
 	testdata.RegisterQueryServer(app.GRPCQueryRouter(), testdata.QueryImpl{})
@@ -568,10 +575,11 @@ func NewStargazeApp(
 		slashing.NewAppModule(appCodec, app.SlashingKeeper, app.AccountKeeper, app.BankKeeper, app.StakingKeeper),
 		params.NewAppModule(app.ParamsKeeper),
 		evidence.NewAppModule(app.EvidenceKeeper),
+		authzmodule.NewAppModule(appCodec, app.AuthzKeeper, app.AccountKeeper, app.BankKeeper, app.interfaceRegistry),
 		ibc.NewAppModule(app.IBCKeeper),
 		transferModule,
-		liquidity.NewAppModule(appCodec, app.LiquidityKeeper, app.AccountKeeper, app.BankKeeper),
-		wasm.NewAppModule(&app.wasmKeeper, app.StakingKeeper),
+		// liquidity.NewAppModule(appCodec, app.LiquidityKeeper, app.AccountKeeper, app.BankKeeper),
+		// wasm.NewAppModule(&app.wasmKeeper, app.StakingKeeper),
 	)
 
 	app.sm.RegisterStoreDecoders()
@@ -584,12 +592,21 @@ func NewStargazeApp(
 	// initialize BaseApp
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
-	app.SetAnteHandler(
-		ante.NewAnteHandler(
-			app.AccountKeeper, app.BankKeeper, ante.DefaultSigVerificationGasConsumer,
-			encodingConfig.TxConfig.SignModeHandler(),
-		),
+	anteHandler, err := ante.NewAnteHandler(
+		ante.HandlerOptions{
+			AccountKeeper:   app.AccountKeeper,
+			BankKeeper:      app.BankKeeper,
+			SignModeHandler: encodingConfig.TxConfig.SignModeHandler(),
+			FeegrantKeeper:  app.FeeGrantKeeper,
+			SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
+		},
 	)
+
+	if err != nil {
+		panic(err)
+	}
+
+	app.SetAnteHandler(anteHandler)
 	app.SetEndBlocker(app.EndBlocker)
 
 	if loadLatest {
@@ -609,7 +626,7 @@ func NewStargazeApp(
 
 	app.ScopedIBCKeeper = scopedIBCKeeper
 	app.ScopedTransferKeeper = scopedTransferKeeper
-	app.scopedWasmKeeper = scopedWasmKeeper
+	// app.scopedWasmKeeper = scopedWasmKeeper
 
 	return app
 }
@@ -617,7 +634,7 @@ func NewStargazeApp(
 // MakeCodecs constructs the *std.Codec and *codec.LegacyAmino instances used by
 // simapp. It is useful for tests and clients who do not want to construct the
 // full simapp
-func MakeCodecs() (codec.Marshaler, *codec.LegacyAmino) {
+func MakeCodecs() (codec.Codec, *codec.LegacyAmino) {
 	config := MakeEncodingConfig()
 	return config.Marshaler, config.Amino
 }
@@ -671,7 +688,7 @@ func (app *StargazeApp) LegacyAmino() *codec.LegacyAmino {
 //
 // NOTE: This is solely to be used for testing purposes as it may be desirable
 // for modules to register their own custom testing types.
-func (app *StargazeApp) AppCodec() codec.Marshaler {
+func (app *StargazeApp) AppCodec() codec.Codec {
 	return app.appCodec
 }
 
@@ -767,7 +784,7 @@ func GetMaccPerms() map[string][]string {
 }
 
 // initParamsKeeper init params keeper and its subspaces
-func initParamsKeeper(appCodec codec.BinaryMarshaler,
+func initParamsKeeper(appCodec codec.BinaryCodec,
 	legacyAmino *codec.LegacyAmino,
 	key, tkey sdk.StoreKey) paramskeeper.Keeper {
 	paramsKeeper := paramskeeper.NewKeeper(appCodec, legacyAmino, key, tkey)
@@ -787,8 +804,9 @@ func initParamsKeeper(appCodec codec.BinaryMarshaler,
 	paramsKeeper.Subspace(curatingtypes.ModuleName)
 	paramsKeeper.Subspace(usertypes.ModuleName)
 	paramsKeeper.Subspace(staketypes.ModuleName)
-	paramsKeeper.Subspace(liquiditytypes.ModuleName)
-	paramsKeeper.Subspace(wasm.ModuleName)
+	paramsKeeper.Subspace(daotypes.ModuleName)
+	// paramsKeeper.Subspace(liquiditytypes.ModuleName)
+	// paramsKeeper.Subspace(wasm.ModuleName)
 
 	return paramsKeeper
 }
